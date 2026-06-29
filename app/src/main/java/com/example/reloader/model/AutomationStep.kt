@@ -7,11 +7,9 @@ enum class StepType {
     WAIT,
     BACK,
     HOME,
-
     WAIT_FOR_INPUT,
-
-    INPUT_TEXT
-
+    INPUT_TEXT,
+    END_SESSION
 }
 
 data class AutomationStep(

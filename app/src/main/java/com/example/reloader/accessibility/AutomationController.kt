@@ -32,6 +32,7 @@ class AutomationController(private val service: AccessibilityService) {
                 }
                 StepType.WAIT_FOR_INPUT -> waitForInput(step.timeoutMs)
                 StepType.INPUT_TEXT -> inputText(step.value)
+                StepType.END_SESSION -> endSession()
             }
 
             if (!success && !step.optional) {
@@ -109,7 +110,7 @@ class AutomationController(private val service: AccessibilityService) {
         return null
     }
 
-    private fun clickText(text: String?): Boolean {
+    fun clickText(text: String?): Boolean {
         if (text == null) return false
         val root = service.rootInActiveWindow ?: return false
         val nodes = root.findAccessibilityNodeInfosByText(text)
@@ -125,7 +126,7 @@ class AutomationController(private val service: AccessibilityService) {
         return false
     }
 
-    private fun clickId(id: String?): Boolean {
+    fun clickId(id: String?): Boolean {
         if (id == null) return false
         val root = service.rootInActiveWindow ?: return false
         val nodes = root.findAccessibilityNodeInfosByViewId(id)
@@ -138,6 +139,48 @@ class AutomationController(private val service: AccessibilityService) {
         }
         nodes.forEach { it.recycle() }
         root.recycle()
+        return false
+    }
+
+    fun clickContentDescription(desc: String?): Boolean {
+        if (desc == null) return false
+        val root = service.rootInActiveWindow ?: return false
+        val node = findNodeByContentDescription(root, desc)
+        if (node != null) {
+            val success = performClick(node)
+            node.recycle()
+            root.recycle()
+            return success
+        }
+        root.recycle()
+        return false
+    }
+
+    private fun findNodeByContentDescription(root: AccessibilityNodeInfo, desc: String): AccessibilityNodeInfo? {
+        if (root.contentDescription?.toString()?.contains(desc, ignoreCase = true) == true) {
+            @Suppress("DEPRECATION")
+            return AccessibilityNodeInfo.obtain(root)
+        }
+        for (i in 0 until root.childCount) {
+            val child = root.getChild(i) ?: continue
+            val result = findNodeByContentDescription(child, desc)
+            child.recycle()
+            if (result != null) return result
+        }
+        return null
+    }
+
+    private suspend fun endSession(): Boolean {
+        val menuClicked = clickContentDescription("More options") || 
+                         clickContentDescription("Menu")
+        
+        if (menuClicked) {
+            delay(1000)
+            if (clickText("End Session")) {
+                Log.d(TAG, "Session ended successfully")
+                return true
+            }
+        }
         return false
     }
 

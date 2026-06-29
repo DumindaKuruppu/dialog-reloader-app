@@ -4,14 +4,12 @@ import android.accessibilityservice.AccessibilityService
 import android.content.Intent
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
+import android.widget.Toast
 import com.example.reloader.model.AppStatus
 import com.example.reloader.model.AutomationStep
 import com.example.reloader.model.StepType
 import com.example.reloader.repository.StockRepository
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.*
 
 class StkAccessibilityService : AccessibilityService() {
     private val TAG = "StkAccessibilityService"
@@ -77,19 +75,38 @@ class StkAccessibilityService : AccessibilityService() {
                 AutomationStep(StepType.INPUT_TEXT, "1111"),
                 AutomationStep(StepType.WAIT_FOR_TEXT, "OK", 5000, optional = true),
                 AutomationStep(StepType.CLICK_TEXT, "OK", optional = true),
-                AutomationStep(StepType.WAIT, "2000"), // Wait for SMS to be sent
-                AutomationStep(StepType.HOME)
+                AutomationStep(StepType.WAIT, "3000"), // Wait for SMS to be sent
+                AutomationStep(StepType.END_SESSION)
             )
 
             val result = controller.runFlow(flow)
             if (result) {
                 Log.d(TAG, "Automation flow completed successfully")
                 repository.updateStatus(AppStatus.WaitingForSms)
+                returnToApp()
             } else {
-                Log.e(TAG, "Automation flow failed")
-                repository.updateStatus(AppStatus.Failed("Stock Check Failed"))
+                Log.e(TAG, "Automation flow failed. Attempting recovery.")
+                handleFlowError()
             }
         }
+    }
+
+    private fun returnToApp() {
+        val intent = packageManager.getLaunchIntentForPackage(packageName)
+        intent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        startActivity(intent)
+    }
+
+    private suspend fun handleFlowError() {
+        controller.runFlow(listOf(AutomationStep(StepType.END_SESSION, optional = true)))
+
+        withContext(Dispatchers.Main) {
+            Toast.makeText(applicationContext, "Error encountered. Please start from the beginning.", Toast.LENGTH_LONG).show()
+        }
+        
+        repository.updateStatus(AppStatus.Failed("Flow Interrupted. Try Again."))
+        controller.runFlow(listOf(AutomationStep(StepType.HOME)))
+        returnToApp()
     }
 
     companion object {
