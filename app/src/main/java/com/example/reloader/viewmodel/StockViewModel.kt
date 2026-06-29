@@ -13,6 +13,9 @@ import com.example.reloader.repository.StockRepository
 import com.example.reloader.utils.AccessibilityUtils
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.regex.Pattern
 
 class StockViewModel(application: Application) : AndroidViewModel(application) {
@@ -23,6 +26,50 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
         checkAccessibilityStatus()
         loadLatestSmsBalance()
         loadSavedReloads()
+        loadPresetAmounts()
+    }
+
+    private fun loadPresetAmounts() {
+        val prefs = getApplication<Application>().getSharedPreferences("settings", Application.MODE_PRIVATE)
+        val savedData = prefs.getStringSet("preset_amounts_v2", null)
+        
+        if (savedData == null) {
+            // Migration or initial load
+            val oldAmounts = prefs.getStringSet("preset_amounts", setOf("50", "100", "200", "500", "1000"))
+            val presets = oldAmounts?.map { com.example.reloader.model.PresetAmount(it) } ?: emptyList()
+            repository.updatePresetAmounts(presets)
+        } else {
+            val presets = savedData.mapNotNull { 
+                val parts = it.split("|", limit = 2)
+                if (parts.isNotEmpty()) {
+                    com.example.reloader.model.PresetAmount(parts[0], if (parts.size > 1) parts[1] else "")
+                } else null
+            }
+            repository.updatePresetAmounts(presets)
+        }
+    }
+
+    fun addPresetAmount(amount: String, description: String = "") {
+        if (amount.isEmpty()) return
+        val current = uiState.value.presetAmounts.toMutableList()
+        // Replace if exists, or add new
+        current.removeAll { it.amount == amount }
+        current.add(com.example.reloader.model.PresetAmount(amount, description))
+        repository.updatePresetAmounts(current)
+        persistPresetAmounts()
+    }
+
+    fun deletePresetAmount(amount: String) {
+        val current = uiState.value.presetAmounts.toMutableList()
+        current.removeAll { it.amount == amount }
+        repository.updatePresetAmounts(current)
+        persistPresetAmounts()
+    }
+
+    private fun persistPresetAmounts() {
+        val prefs = getApplication<Application>().getSharedPreferences("settings", Application.MODE_PRIVATE)
+        val dataSet = uiState.value.presetAmounts.map { "${it.amount}|${it.description}" }.toSet()
+        prefs.edit().putStringSet("preset_amounts_v2", dataSet).apply()
     }
 
     private fun loadSavedReloads() {
@@ -69,17 +116,33 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
                     "date DESC"
                 )
 
+                val messages = mutableListOf<com.example.reloader.model.SmsMessage>()
+                val dateFormat = SimpleDateFormat("MMM dd, hh:mm a", Locale.getDefault())
+
                 cursor?.use {
+                    var balanceUpdated = false
                     while (it.moveToNext()) {
                         val body = it.getString(0)
-                        val address = it.getString(1)
+                        val dateLong = it.getLong(2)
+                        val dateStr = dateFormat.format(Date(dateLong))
                         
-                        if (body.contains("RD Balance", ignoreCase = true)) {
-                            parseAndUpdateFromSms(body)
-                            break // Found the latest one
+                        // Check for eZ Reload messages
+                        if (body.contains("RD Balance", ignoreCase = true) || 
+                            body.contains("Reload Success", ignoreCase = true) ||
+                            body.contains("eZ Reload", ignoreCase = true)) {
+                            
+                            if (!balanceUpdated && body.contains("RD Balance", ignoreCase = true)) {
+                                parseAndUpdateFromSms(body)
+                                balanceUpdated = true
+                            }
+                            
+                            if (messages.size < 20) {
+                                messages.add(com.example.reloader.model.SmsMessage(body, dateStr))
+                            }
                         }
                     }
                 }
+                repository.updateRecentMessages(messages)
             } catch (e: Exception) {
                 Log.e("StockViewModel", "Error reading SMS inbox", e)
             }
@@ -116,6 +179,10 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun performReload(reload: ReloadAmount) {
+        performQuickReload(reload.phoneNumber, reload.amount)
+    }
+
+    fun performQuickReload(phoneNumber: String, amount: String) {
         if (!uiState.value.isAccessibilityEnabled) {
             repository.updateStatus(AppStatus.Failed("Accessibility Service Disabled"))
             return
@@ -123,7 +190,7 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
 
         val service = StkAccessibilityService.getInstance()
         if (service != null) {
-            service.startReload(reload.phoneNumber, reload.amount)
+            service.startReload(phoneNumber, amount)
         } else {
             repository.updateStatus(AppStatus.Failed("Service not running. Please enable it."))
         }

@@ -46,6 +46,14 @@ class StockRepository {
         _uiState.update { it.copy(isAccessibilityEnabled = enabled) }
     }
 
+    fun updateRecentMessages(messages: List<com.example.reloader.model.SmsMessage>) {
+        _uiState.update { it.copy(recentMessages = messages) }
+    }
+
+    fun updatePresetAmounts(amounts: List<com.example.reloader.model.PresetAmount>) {
+        _uiState.update { it.copy(presetAmounts = amounts.sortedBy { a -> a.amount.toIntOrNull() ?: 0 }) }
+    }
+
     companion object {
         @Volatile
         private var instance: StockRepository? = null

@@ -46,34 +46,59 @@ class AutomationController(private val service: AccessibilityService) {
 
     private suspend fun waitForText(text: String?, timeout: Long): Boolean {
         if (text == null) return false
+        Log.d(TAG, "Waiting for text: '$text' (Timeout: ${timeout}ms)")
         val startTime = System.currentTimeMillis()
+        
+        // Give the UI a moment to start transitioning if a click just happened
+        delay(300)
+
         while (System.currentTimeMillis() - startTime < timeout) {
-            val root = service.rootInActiveWindow ?: continue
-            val nodes = root.findAccessibilityNodeInfosByText(text)
-            if (nodes.isNotEmpty()) {
+            val root = service.rootInActiveWindow
+            if (root != null) {
+                val nodes = root.findAccessibilityNodeInfosByText(text)
+                // Filter for nodes that are actually visible and match exactly
+                val hasMatch = nodes.any { node ->
+                    node.refresh() 
+                    val isVisible = node.isVisibleToUser
+                    val matches = node.text?.toString()?.equals(text, ignoreCase = true) == true ||
+                                 node.contentDescription?.toString()?.equals(text, ignoreCase = true) == true
+                    isVisible && matches
+                }
+                
                 nodes.forEach { it.recycle() }
                 root.recycle()
-                return true
+                
+                if (hasMatch) {
+                    Log.d(TAG, "Found visible match for: '$text'")
+                    // Wait a tiny bit more to ensure the UI is stable/clickable
+                    delay(200)
+                    return true
+                }
             }
-            root.recycle()
             delay(500)
         }
+        Log.e(TAG, "Timed out waiting for text: '$text'")
         return false
     }
 
     private suspend fun waitForInput(timeout: Long): Boolean {
+        Log.d(TAG, "Waiting for input field (Timeout: ${timeout}ms)")
         val startTime = System.currentTimeMillis()
         while (System.currentTimeMillis() - startTime < timeout) {
-            val root = service.rootInActiveWindow ?: continue
-            val inputNode = findInputNode(root)
-            if (inputNode != null) {
-                inputNode.recycle()
+            val root = service.rootInActiveWindow
+            if (root != null) {
+                val inputNode = findInputNode(root)
+                if (inputNode != null) {
+                    Log.d(TAG, "Found visible input field")
+                    inputNode.recycle()
+                    root.recycle()
+                    return true
+                }
                 root.recycle()
-                return true
             }
-            root.recycle()
             delay(500)
         }
+        Log.e(TAG, "Timed out waiting for input field")
         return false
     }
 
@@ -94,7 +119,7 @@ class AutomationController(private val service: AccessibilityService) {
     }
 
     private fun findInputNode(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-        if (root.isEditable || root.className?.contains("EditText", ignoreCase = true) == true) {
+        if ((root.isEditable || root.className?.contains("EditText", ignoreCase = true) == true) && root.isVisibleToUser) {
             @Suppress("DEPRECATION")
             return AccessibilityNodeInfo.obtain(root)
         }
@@ -157,7 +182,7 @@ class AutomationController(private val service: AccessibilityService) {
     }
 
     private fun findNodeByContentDescription(root: AccessibilityNodeInfo, desc: String): AccessibilityNodeInfo? {
-        if (root.contentDescription?.toString()?.contains(desc, ignoreCase = true) == true) {
+        if (root.contentDescription?.toString()?.contains(desc, ignoreCase = true) == true && root.isVisibleToUser) {
             @Suppress("DEPRECATION")
             return AccessibilityNodeInfo.obtain(root)
         }
@@ -190,7 +215,9 @@ class AutomationController(private val service: AccessibilityService) {
             if (current.isClickable) {
                 return current.performAction(AccessibilityNodeInfo.ACTION_CLICK)
             }
-            current = current.parent
+            val parent = current.parent
+            if (current != node) current.recycle() // Recycle intermediate parents
+            current = parent
         }
         return false
     }

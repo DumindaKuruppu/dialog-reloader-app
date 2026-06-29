@@ -3,7 +3,12 @@ package com.example.reloader.ui
 import android.content.Intent
 import android.provider.Settings
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -19,26 +24,48 @@ import androidx.compose.ui.unit.sp
 import com.example.reloader.R
 import com.example.reloader.model.AppStatus
 import com.example.reloader.model.AppUiState
+import com.example.reloader.model.PresetAmount
 import com.example.reloader.model.ReloadAmount
 import com.example.reloader.model.StockInfo
 import com.example.reloader.ui.theme.ReloaderTheme
 import com.example.reloader.viewmodel.StockViewModel
+import kotlinx.coroutines.launch
+
+enum class Screen {
+    Main,
+    ManageAmounts
+}
 
 @Composable
 fun StockScreen(viewModel: StockViewModel) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
+    var currentScreen by remember { mutableStateOf(Screen.Main) }
 
-    StockContent(
-        uiState = uiState,
-        onCheckStock = { viewModel.checkStock() },
-        onPerformReload = { viewModel.performReload(it) },
-        onSaveReload = { label, phone, amount -> viewModel.saveReload(label, phone, amount) },
-        onDeleteReload = { viewModel.deleteReload(it) },
-        onEnableAccessibility = {
-            context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+    when (currentScreen) {
+        Screen.Main -> {
+            StockContent(
+                uiState = uiState,
+                onCheckStock = { viewModel.checkStock() },
+                onPerformReload = { viewModel.performReload(it) },
+                onSaveReload = { label, phone, amount -> viewModel.saveReload(label, phone, amount) },
+                onDeleteReload = { viewModel.deleteReload(it) },
+                onEnableAccessibility = {
+                    context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                },
+                onQuickReload = { phone, amount -> viewModel.performQuickReload(phone, amount) },
+                onNavigateToManageAmounts = { currentScreen = Screen.ManageAmounts }
+            )
         }
-    )
+        Screen.ManageAmounts -> {
+            ManageAmountsScreen(
+                amounts = uiState.presetAmounts,
+                onAdd = { amount, desc -> viewModel.addPresetAmount(amount, desc) },
+                onDelete = { viewModel.deletePresetAmount(it) },
+                onBack = { currentScreen = Screen.Main }
+            )
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -49,9 +76,90 @@ fun StockContent(
     onPerformReload: (ReloadAmount) -> Unit,
     onSaveReload: (String, String, String) -> Unit,
     onDeleteReload: (String) -> Unit,
-    onEnableAccessibility: () -> Unit
+    onEnableAccessibility: () -> Unit,
+    onQuickReload: (String, String) -> Unit,
+    onNavigateToManageAmounts: () -> Unit
 ) {
-    var showAddDialog by remember { mutableStateOf(false) }
+    var showQuickReloadDialog by remember { mutableStateOf(false) }
+    var showAddCustomerDialog by remember { mutableStateOf(false) }
+    val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet(
+                modifier = Modifier.width(320.dp),
+                drawerContainerColor = MaterialTheme.colorScheme.surface
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(24.dp)
+                ) {
+                    Text(
+                        "Settings & Management",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+
+                    // Section: Check Stock Action
+                    Button(
+                        onClick = {
+                            onCheckStock()
+                            scope.launch { drawerState.close() }
+                        },
+                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                        enabled = uiState.status !is AppStatus.Running && uiState.status !is AppStatus.WaitingForSms
+                    ) {
+                        Text("ශේෂය පරීක්ෂා කරන්න (Check Stock)")
+                    }
+
+                    HorizontalDivider()
+
+                    // Navigation link to Manage Amounts
+                    NavigationDrawerItem(
+                        label = { Text("Manage Preset Amounts") },
+                        selected = false,
+                        onClick = {
+                            scope.launch { drawerState.close() }
+                            onNavigateToManageAmounts()
+                        },
+                        icon = { Icon(Icons.Default.List, contentDescription = null) }
+                    )
+
+                    HorizontalDivider()
+
+                    // Section: Manage Customers
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("Saved Customers", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            IconButton(onClick = { showAddCustomerDialog = true }) {
+                                Icon(Icons.Default.Add, contentDescription = "Add Customer")
+                            }
+                        }
+                        
+                        ReloadList(
+                            reloads = uiState.reloads,
+                            onPerformReload = { 
+                                onPerformReload(it)
+                                scope.launch { drawerState.close() }
+                            },
+                            onDeleteReload = onDeleteReload,
+                            isEnabled = uiState.status is AppStatus.Idle
+                        )
+                    }
+                }
+            }
+        }
+    ) {
 
     Scaffold(
         topBar = {
@@ -73,90 +181,204 @@ fun StockContent(
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.secondary
-                )
+                ),
+                navigationIcon = {
+                    IconButton(onClick = {
+                        scope.launch { drawerState.open() }
+                    }) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Settings",
+                            tint = Color.White
+                        )
+                    }
+                }
             )
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = { showAddDialog = true },
+                onClick = { showQuickReloadDialog = true },
                 containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = Color.White
             ) {
-                Text("+", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                Text("රීලෝඩ්", fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp))
             }
-        }
-    ) { padding ->
+        }    ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            StockCard(uiState)
-
-            Button(
-                onClick = onCheckStock,
-                modifier = Modifier.fillMaxWidth().height(56.dp),
-                enabled = uiState.status !is AppStatus.Running && uiState.status !is AppStatus.WaitingForSms,
-                shape = MaterialTheme.shapes.medium
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                when (uiState.status) {
-                    is AppStatus.Running -> {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp),
-                            color = Color.White,
-                            strokeWidth = 2.dp
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text("Checking...")
-                    }
-                    is AppStatus.WaitingForSms -> {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(24.dp),
-                            color = Color.White,
-                            strokeWidth = 2.dp
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text("Waiting for SMS...")
-                    }
-                    else -> {
-                        Text("ශේෂය පරීක්ෂා කරන්න", fontSize = 18.sp)
-                    }
+                Box(modifier = Modifier.weight(0.6f)) {
+                    StockCard(uiState)
+                }
+                Box(modifier = Modifier.weight(0.4f)) {
+                    StatusSection(uiState)
                 }
             }
-
-            Text(
-                "පාරිභෝගික රීලෝඩ්ස්",
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.align(Alignment.Start),
-                fontWeight = FontWeight.Bold
-            )
-
-            ReloadList(
-                reloads = uiState.reloads,
-                onPerformReload = onPerformReload,
-                onDeleteReload = onDeleteReload,
-                isEnabled = uiState.status !is AppStatus.Running && uiState.status !is AppStatus.WaitingForSms
-            )
-
-            StatusSection(uiState)
 
             if (!uiState.isAccessibilityEnabled) {
                 PermissionBanner(onEnableAccessibility)
             }
+
+            HorizontalDivider()
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "Recent eZ Reload Messages",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            Box(modifier = Modifier.weight(1f)) {
+                MessageList(messages = uiState.recentMessages)
+            }
         }
     }
+}
 
-    if (showAddDialog) {
-        AddReloadDialog(
-            onDismiss = { showAddDialog = false },
-            onConfirm = { label, phone, amount ->
-                onSaveReload(label, phone, amount)
-                showAddDialog = false
+    if (showQuickReloadDialog) {
+        QuickReloadDialog(
+            presetAmounts = uiState.presetAmounts,
+            onDismiss = { showQuickReloadDialog = false },
+            onConfirm = { phone, amount ->
+                onQuickReload(phone, amount)
+                showQuickReloadDialog = false
             }
         )
+    }
+
+    if (showAddCustomerDialog) {
+        AddReloadDialog(
+            presetAmounts = uiState.presetAmounts,
+            onDismiss = { showAddCustomerDialog = false },
+            onConfirm = { label, phone, amount ->
+                onSaveReload(label, phone, amount)
+                showAddCustomerDialog = false
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ManageAmountsScreen(
+    amounts: List<PresetAmount>,
+    onAdd: (String, String) -> Unit,
+    onDelete: (String) -> Unit,
+    onBack: () -> Unit
+) {
+    var newAmount by remember { mutableStateOf("") }
+    var newDescription by remember { mutableStateOf("") }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Manage Preset Amounts") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer
+                )
+            )
+        }
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text("Add New Preset", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    
+                    OutlinedTextField(
+                        value = newAmount,
+                        onValueChange = { if (it.length <= 5) newAmount = it },
+                        label = { Text("Amount (Rs.)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
+                    OutlinedTextField(
+                        value = newDescription,
+                        onValueChange = { newDescription = it },
+                        label = { Text("Description (Optional)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("e.g. Data, Voice") }
+                    )
+                    Button(
+                        onClick = {
+                            onAdd(newAmount, newDescription)
+                            newAmount = ""
+                            newDescription = ""
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = newAmount.isNotEmpty()
+                    ) {
+                        Text("Add Preset")
+                    }
+                }
+            }
+
+            HorizontalDivider()
+
+            Text("Current Presets", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+
+            if (amounts.isEmpty()) {
+                Text("No presets added yet.", color = Color.Gray)
+            } else {
+                amounts.forEach { preset ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column {
+                                Text("Rs. ${preset.amount}", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)
+                                if (preset.description.isNotEmpty()) {
+                                    Text(preset.description, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                                }
+                            }
+                            IconButton(onClick = { onDelete(preset.amount) }) {
+                                Icon(
+                                    imageVector = Icons.Default.Delete,
+                                    contentDescription = "Delete",
+                                    tint = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -169,12 +391,10 @@ fun StockCard(uiState: AppUiState) {
         shape = MaterialTheme.shapes.large
     ) {
         Column(
-            modifier = Modifier.padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             StockItem(label = "RD Balance", value = uiState.stockInfo.balance, valueColor = MaterialTheme.colorScheme.primary)
-            StockItem(label = "Commission Balance", value = uiState.stockInfo.commission, valueColor = MaterialTheme.colorScheme.secondary)
-            StockItem(label = "Last Updated", value = uiState.stockInfo.lastUpdated)
         }
     }
 }
@@ -220,7 +440,11 @@ fun ReloadItem(
 
             Row {
                 IconButton(onClick = { onDeleteReload(reload.id) }) {
-                    Text("🗑️", fontSize = 20.sp)
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Delete",
+                        tint = MaterialTheme.colorScheme.error
+                    )
                 }
                 Button(
                     onClick = { onPerformReload(reload) },
@@ -235,12 +459,81 @@ fun ReloadItem(
 }
 
 @Composable
-fun AddReloadDialog(onDismiss: () -> Unit, onConfirm: (String, String, String) -> Unit) {
-    var label by remember { mutableStateOf("") }
+fun QuickReloadDialog(
+    presetAmounts: List<PresetAmount>,
+    onDismiss: () -> Unit,
+    onConfirm: (String, String) -> Unit
+) {
     var phone by remember { mutableStateOf("") }
     var amount by remember { mutableStateOf("") }
 
-    val presetAmounts = listOf("50", "100", "200", "500", "1000")
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Quick Reload") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = phone,
+                    onValueChange = { phone = it },
+                    label = { Text("Phone Number") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Phone)
+                )
+
+                Text("Select or Enter Amount", style = MaterialTheme.typography.labelMedium)
+
+                Row(
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    presetAmounts.forEach { preset ->
+                        FilterChip(
+                            selected = amount == preset.amount,
+                            onClick = { amount = preset.amount },
+                            label = { 
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(preset.amount)
+                                    if (preset.description.isNotEmpty()) {
+                                        Text(preset.description, style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                            }
+                        )
+                    }
+                }
+
+                OutlinedTextField(
+                    value = amount,
+                    onValueChange = { amount = it },
+                    label = { Text("Amount") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number)
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { if (phone.isNotEmpty() && amount.isNotEmpty()) onConfirm(phone, amount) },
+                enabled = phone.isNotEmpty() && amount.isNotEmpty()
+            ) {
+                Text("Perform Reload")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+fun AddReloadDialog(
+    presetAmounts: List<PresetAmount>,
+    onDismiss: () -> Unit,
+    onConfirm: (String, String, String) -> Unit
+) {
+    var label by remember { mutableStateOf("") }
+    var phone by remember { mutableStateOf("") }
+    var amount by remember { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -264,14 +557,21 @@ fun AddReloadDialog(onDismiss: () -> Unit, onConfirm: (String, String, String) -
                 Text("Select or Enter Amount", style = MaterialTheme.typography.labelMedium)
 
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     presetAmounts.forEach { preset ->
                         FilterChip(
-                            selected = amount == preset,
-                            onClick = { amount = preset },
-                            label = { Text(preset) }
+                            selected = amount == preset.amount,
+                            onClick = { amount = preset.amount },
+                            label = { 
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(preset.amount)
+                                    if (preset.description.isNotEmpty()) {
+                                        Text(preset.description, style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                            }
                         )
                     }
                 }
@@ -300,6 +600,57 @@ fun AddReloadDialog(onDismiss: () -> Unit, onConfirm: (String, String, String) -
 }
 
 @Composable
+fun MessageList(messages: List<com.example.reloader.model.SmsMessage>) {
+    if (messages.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("No messages from eZ Reload found.", color = Color.Gray)
+        }
+    } else {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            messages.forEach { msg ->
+                MessageItem(msg)
+            }
+        }
+    }
+}
+
+@Composable
+fun MessageItem(message: com.example.reloader.model.SmsMessage) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+        shape = MaterialTheme.shapes.medium
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(
+                    text = "eZ Reload",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = message.date,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.Gray
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = message.body,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
 fun StockItem(label: String, value: String, valueColor: Color = MaterialTheme.colorScheme.onSurface) {
     Column {
         Text(text = label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.outline)
@@ -324,8 +675,8 @@ fun StatusSection(uiState: AppUiState) {
     }
 
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(text = "Status:", style = MaterialTheme.typography.labelMedium)
-        Text(text = statusText, style = MaterialTheme.typography.bodyLarge, color = statusColor, fontWeight = FontWeight.Medium)
+        Text(text = "Status", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline)
+        Text(text = statusText, style = MaterialTheme.typography.bodyMedium, color = statusColor, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -363,7 +714,9 @@ fun StockScreenPreview() {
             onPerformReload = {},
             onSaveReload = { _, _, _ -> },
             onDeleteReload = {},
-            onEnableAccessibility = {}
+            onEnableAccessibility = {},
+            onQuickReload = { _, _ -> },
+            onNavigateToManageAmounts = {}
         )
     }
 }
