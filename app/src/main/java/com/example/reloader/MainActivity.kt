@@ -41,6 +41,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         viewModel.checkAccessibilityStatus()
+        viewModel.loadLatestSmsBalance()
     }
 
     private fun requestPermissions() {

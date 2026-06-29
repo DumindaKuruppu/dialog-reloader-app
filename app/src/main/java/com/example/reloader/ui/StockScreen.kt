@@ -131,8 +131,9 @@ fun StockCard(uiState: AppUiState) {
             modifier = Modifier.padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            StockItem(label = "ඔබගේ රීලෝඩ් ශේෂය", value = uiState.stockInfo.balance, valueColor = MaterialTheme.colorScheme.primary)
-//            StockItem(label = "Last Updated", value = uiState.stockInfo.lastUpdated)
+            StockItem(label = "RD Balance", value = uiState.stockInfo.balance, valueColor = MaterialTheme.colorScheme.primary)
+            StockItem(label = "Commission Balance", value = uiState.stockInfo.commission, valueColor = MaterialTheme.colorScheme.secondary)
+            StockItem(label = "Last Updated", value = uiState.stockInfo.lastUpdated)
         }
     }
 }

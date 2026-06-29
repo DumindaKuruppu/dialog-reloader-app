@@ -17,13 +17,13 @@ class SmsReceiver : BroadcastReceiver() {
             val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
             for (message in messages) {
                 val body = message.displayMessageBody
-                val sender = message.displayOriginatingAddress
+                val sender = message.displayOriginatingAddress ?: ""
 
                 Log.d(TAG, "SMS received from: $sender body: $body")
 
-                // Filter by sender if known, e.g., "Dialog" or a short code
-                // For demonstration, we check if body contains "Balance" and "Commission"
-                if (body.contains("Balance", ignoreCase = true) || body.contains("Commission", ignoreCase = true)) {
+                // Filter by sender "eZ Reload" or check for specific keywords
+                if (sender.contains("eZ Reload", ignoreCase = true) || 
+                    body.contains("RD Balance", ignoreCase = true)) {
                     parseAndUpdateStock(body)
                 }
             }
@@ -32,17 +32,17 @@ class SmsReceiver : BroadcastReceiver() {
 
     private fun parseAndUpdateStock(body: String) {
         try {
-            // Regex for Balance: Rs. 12,500.00
-            val balancePattern = Pattern.compile("Balance\\s*:\\s*Rs\\.\\s*([\\d,]+\\.\\d{2})")
+            // Updated Regex for RD Balance: matches "RD Balance: Rs 3196.00" or "RD Balance: Rs. 3196.00"
+            val balancePattern = Pattern.compile("RD Balance:\\s*Rs\\.?\\s*([\\d,]+\\.\\d{2})", Pattern.CASE_INSENSITIVE)
             val balanceMatcher = balancePattern.matcher(body)
             val balance = if (balanceMatcher.find()) "Rs. ${balanceMatcher.group(1)}" else "Rs. 0.00"
 
-            // Regex for Commission: Rs. 860.00
-            val commissionPattern = Pattern.compile("Commission\\s*:\\s*Rs\\.\\s*([\\d,]+\\.\\d{2})")
+            // Updated Regex for Commission Balance
+            val commissionPattern = Pattern.compile("Commission Balance:\\s*Rs\\.?\\s*([\\d,]+\\.\\d{2})", Pattern.CASE_INSENSITIVE)
             val commissionMatcher = commissionPattern.matcher(body)
             val commission = if (commissionMatcher.find()) "Rs. ${commissionMatcher.group(1)}" else "Rs. 0.00"
 
-            Log.d(TAG, "Parsed Balance: $balance, Commission: $commission")
+            Log.d(TAG, "Parsed RD Balance: $balance, Commission: $commission")
             repository.updateStockInfo(balance, commission)
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing SMS", e)
