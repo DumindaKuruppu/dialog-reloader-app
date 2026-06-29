@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Reloader</string>
+    <string name="accessibility_service_description">Automates SIM Toolkit to check stock balance. This service only runs when you click Check Stock and does not collect any personal data.</string>
+</resources>
