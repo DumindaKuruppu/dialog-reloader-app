@@ -1,6 +1,7 @@
 package com.example.reloader.ui.theme
 
 import android.app.Activity
+import android.content.ContextWrapper
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
@@ -60,9 +61,11 @@ fun ReloaderTheme(
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
-            val window = (view.context as Activity).window
-            window.statusBarColor = colorScheme.primary.toArgb()
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            val window = findWindow(view.context)
+            if (window != null) {
+                window.statusBarColor = colorScheme.primary.toArgb()
+                WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            }
         }
     }
 
@@ -71,4 +74,15 @@ fun ReloaderTheme(
         typography = Typography,
         content = content
     )
+}
+
+private fun findWindow(context: android.content.Context): android.view.Window? {
+    var currentContext = context
+    while (currentContext is ContextWrapper) {
+        if (currentContext is Activity) {
+            return currentContext.window
+        }
+        currentContext = currentContext.baseContext
+    }
+    return null
 }

@@ -91,6 +91,74 @@ class StkAccessibilityService : AccessibilityService() {
         }
     }
 
+    fun startReload(phoneNumber: String, amount: String) {
+        serviceScope.launch {
+            Log.d(TAG, "Starting Reload Automation: $phoneNumber for Rs. $amount")
+            repository.updateStatus(AppStatus.Running)
+
+            // Step 1: Launch STK app
+            val stkPackages = listOf("com.android.stk", "com.mediatek.stk", "com.android.stk2", "com.qualcomm.qti.services.stk")
+            var intent: Intent? = null
+            for (pkg in stkPackages) {
+                intent = packageManager.getLaunchIntentForPackage(pkg)
+                if (intent != null) break
+            }
+
+            if (intent == null) {
+                Log.e(TAG, "STK App not found")
+                repository.updateStatus(AppStatus.Failed("SIM Toolkit not found"))
+                return@launch
+            }
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            startActivity(intent)
+
+            // Step 2: Define Reload steps
+            val flow = listOf(
+                AutomationStep(StepType.WAIT_FOR_TEXT, "eZ Reload", 10000),
+                AutomationStep(StepType.CLICK_TEXT, "eZ Reload"),
+                AutomationStep(StepType.WAIT_FOR_TEXT, "eZ Charge", 5000),
+                AutomationStep(StepType.CLICK_TEXT, "eZ Charge"),
+                
+                // Input Customer Mobile Number
+                AutomationStep(StepType.WAIT_FOR_INPUT, "", 5000),
+                AutomationStep(StepType.INPUT_TEXT, phoneNumber),
+                AutomationStep(StepType.WAIT_FOR_TEXT, "OK", 5000, optional = true),
+                AutomationStep(StepType.CLICK_TEXT, "OK", optional = true),
+
+                AutomationStep(StepType.WAIT_FOR_TEXT, "Enter amount"),
+                AutomationStep(StepType.CLICK_TEXT, "Enter amount"),
+                
+                // Enter amount
+                AutomationStep(StepType.WAIT_FOR_INPUT, "", 5000),
+                AutomationStep(StepType.INPUT_TEXT, amount),
+                AutomationStep(StepType.WAIT_FOR_TEXT, "OK", 5000, optional = true),
+                AutomationStep(StepType.CLICK_TEXT, "OK", optional = true),
+                
+                // Enter PIN
+                AutomationStep(StepType.WAIT_FOR_INPUT, "", 5000),
+                AutomationStep(StepType.INPUT_TEXT, "1234"),
+                AutomationStep(StepType.WAIT_FOR_TEXT, "OK", 5000, optional = true),
+                AutomationStep(StepType.CLICK_TEXT, "OK", optional = true),
+                
+                // Confirmation popup
+                AutomationStep(StepType.WAIT_FOR_TEXT, "OK", 10000, optional = true),
+                AutomationStep(StepType.CLICK_TEXT, "OK", optional = true),
+                
+                AutomationStep(StepType.END_SESSION)
+            )
+
+            val result = controller.runFlow(flow)
+            if (result) {
+                Log.d(TAG, "Reload automation flow completed successfully")
+                repository.updateStatus(AppStatus.Success("Reload Submitted"))
+                returnToApp()
+            } else {
+                Log.e(TAG, "Reload automation flow failed")
+                handleFlowError()
+            }
+        }
+    }
+
     private fun returnToApp() {
         val intent = packageManager.getLaunchIntentForPackage(packageName)
         intent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)

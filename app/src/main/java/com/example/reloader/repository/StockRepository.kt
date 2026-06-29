@@ -2,6 +2,7 @@ package com.example.reloader.repository
 
 import com.example.reloader.model.AppStatus
 import com.example.reloader.model.AppUiState
+import com.example.reloader.model.ReloadAmount
 import com.example.reloader.model.StockInfo
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -17,6 +18,18 @@ class StockRepository {
 
     fun updateStatus(status: AppStatus) {
         _uiState.update { it.copy(status = status) }
+    }
+
+    fun updateReloads(reloads: List<ReloadAmount>) {
+        _uiState.update { it.copy(reloads = reloads) }
+    }
+
+    fun addReload(reload: ReloadAmount) {
+        _uiState.update { it.copy(reloads = it.reloads + reload) }
+    }
+
+    fun removeReload(reloadId: String) {
+        _uiState.update { it.copy(reloads = it.reloads.filter { r -> r.id != reloadId }) }
     }
 
     fun updateStockInfo(balance: String, commission: String) {

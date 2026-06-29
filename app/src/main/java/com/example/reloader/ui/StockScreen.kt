@@ -12,12 +12,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.reloader.R
 import com.example.reloader.model.AppStatus
 import com.example.reloader.model.AppUiState
+import com.example.reloader.model.ReloadAmount
 import com.example.reloader.model.StockInfo
 import com.example.reloader.ui.theme.ReloaderTheme
 import com.example.reloader.viewmodel.StockViewModel
@@ -30,6 +32,9 @@ fun StockScreen(viewModel: StockViewModel) {
     StockContent(
         uiState = uiState,
         onCheckStock = { viewModel.checkStock() },
+        onPerformReload = { viewModel.performReload(it) },
+        onSaveReload = { label, phone, amount -> viewModel.saveReload(label, phone, amount) },
+        onDeleteReload = { viewModel.deleteReload(it) },
         onEnableAccessibility = {
             context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
@@ -41,8 +46,13 @@ fun StockScreen(viewModel: StockViewModel) {
 fun StockContent(
     uiState: AppUiState,
     onCheckStock: () -> Unit,
+    onPerformReload: (ReloadAmount) -> Unit,
+    onSaveReload: (String, String, String) -> Unit,
+    onDeleteReload: (String) -> Unit,
     onEnableAccessibility: () -> Unit
 ) {
+    var showAddDialog by remember { mutableStateOf(false) }
+
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
@@ -65,19 +75,26 @@ fun StockContent(
                     containerColor = MaterialTheme.colorScheme.secondary
                 )
             )
+        },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = { showAddDialog = true },
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = Color.White
+            ) {
+                Text("+", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+            }
         }
     ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(24.dp),
+                .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(24.dp)
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             StockCard(uiState)
-
-            Spacer(modifier = Modifier.height(16.dp))
 
             Button(
                 onClick = onCheckStock,
@@ -110,12 +127,36 @@ fun StockContent(
                 }
             }
 
+            Text(
+                "පාරිභෝගික රීලෝඩ්ස්",
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.align(Alignment.Start),
+                fontWeight = FontWeight.Bold
+            )
+
+            ReloadList(
+                reloads = uiState.reloads,
+                onPerformReload = onPerformReload,
+                onDeleteReload = onDeleteReload,
+                isEnabled = uiState.status !is AppStatus.Running && uiState.status !is AppStatus.WaitingForSms
+            )
+
             StatusSection(uiState)
 
             if (!uiState.isAccessibilityEnabled) {
                 PermissionBanner(onEnableAccessibility)
             }
         }
+    }
+
+    if (showAddDialog) {
+        AddReloadDialog(
+            onDismiss = { showAddDialog = false },
+            onConfirm = { label, phone, amount ->
+                onSaveReload(label, phone, amount)
+                showAddDialog = false
+            }
+        )
     }
 }
 
@@ -136,6 +177,126 @@ fun StockCard(uiState: AppUiState) {
             StockItem(label = "Last Updated", value = uiState.stockInfo.lastUpdated)
         }
     }
+}
+
+@Composable
+fun ReloadList(
+    reloads: List<ReloadAmount>,
+    onPerformReload: (ReloadAmount) -> Unit,
+    onDeleteReload: (String) -> Unit,
+    isEnabled: Boolean
+) {
+    if (reloads.isEmpty()) {
+        Text("No saved reloads yet.", style = MaterialTheme.typography.bodyMedium, color = Color.Gray)
+    } else {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            reloads.forEach { reload ->
+                ReloadItem(reload, onPerformReload, onDeleteReload, isEnabled)
+            }
+        }
+    }
+}
+
+@Composable
+fun ReloadItem(
+    reload: ReloadAmount,
+    onPerformReload: (ReloadAmount) -> Unit,
+    onDeleteReload: (String) -> Unit,
+    isEnabled: Boolean
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(reload.label, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyLarge)
+                Text("${reload.phoneNumber} | Rs. ${reload.amount}", style = MaterialTheme.typography.bodySmall)
+            }
+
+            Row {
+                IconButton(onClick = { onDeleteReload(reload.id) }) {
+                    Text("🗑️", fontSize = 20.sp)
+                }
+                Button(
+                    onClick = { onPerformReload(reload) },
+                    enabled = isEnabled,
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text("රීලෝඩ්", color = Color.White)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AddReloadDialog(onDismiss: () -> Unit, onConfirm: (String, String, String) -> Unit) {
+    var label by remember { mutableStateOf("") }
+    var phone by remember { mutableStateOf("") }
+    var amount by remember { mutableStateOf("") }
+
+    val presetAmounts = listOf("50", "100", "200", "500", "1000")
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add Customer Reload") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = label,
+                    onValueChange = { label = it },
+                    label = { Text("Customer Name") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = phone,
+                    onValueChange = { phone = it },
+                    label = { Text("Phone Number") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Phone)
+                )
+
+                Text("Select or Enter Amount", style = MaterialTheme.typography.labelMedium)
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    presetAmounts.forEach { preset ->
+                        FilterChip(
+                            selected = amount == preset,
+                            onClick = { amount = preset },
+                            label = { Text(preset) }
+                        )
+                    }
+                }
+
+                OutlinedTextField(
+                    value = amount,
+                    onValueChange = { amount = it },
+                    label = { Text("Custom Amount") },
+                    modifier = Modifier.fillMaxWidth(),
+                    keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number)
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { if (label.isNotEmpty() && phone.isNotEmpty() && amount.isNotEmpty()) onConfirm(label, phone, amount) },
+                enabled = label.isNotEmpty() && phone.isNotEmpty() && amount.isNotEmpty()
+            ) {
+                Text("Save Customer")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
 }
 
 @Composable
@@ -194,10 +355,14 @@ fun StockScreenPreview() {
         StockContent(
             uiState = AppUiState(
                 stockInfo = StockInfo("Rs. 12,500.00", "Rs. 860.00", "10:42 AM"),
+                reloads = listOf(ReloadAmount(label = "Test User", phoneNumber = "0771234567", amount = "100")),
                 status = AppStatus.Idle,
                 isAccessibilityEnabled = true
             ),
             onCheckStock = {},
+            onPerformReload = {},
+            onSaveReload = { _, _, _ -> },
+            onDeleteReload = {},
             onEnableAccessibility = {}
         )
     }

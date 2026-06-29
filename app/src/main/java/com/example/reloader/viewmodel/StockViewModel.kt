@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.reloader.accessibility.StkAccessibilityService
 import com.example.reloader.model.AppStatus
 import com.example.reloader.model.AppUiState
+import com.example.reloader.model.ReloadAmount
 import com.example.reloader.repository.StockRepository
 import com.example.reloader.utils.AccessibilityUtils
 import kotlinx.coroutines.flow.StateFlow
@@ -21,6 +22,34 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
     init {
         checkAccessibilityStatus()
         loadLatestSmsBalance()
+        loadSavedReloads()
+    }
+
+    private fun loadSavedReloads() {
+        val prefs = getApplication<Application>().getSharedPreferences("reloads", Application.MODE_PRIVATE)
+        val savedData = prefs.getStringSet("reload_list", emptySet()) ?: emptySet()
+        val reloads = savedData.mapNotNull { 
+            val parts = it.split("|")
+            if (parts.size == 4) ReloadAmount(parts[0], parts[1], parts[2], parts[3]) else null
+        }
+        repository.updateReloads(reloads)
+    }
+
+    fun saveReload(label: String, phoneNumber: String, amount: String) {
+        val newReload = ReloadAmount(label = label, phoneNumber = phoneNumber, amount = amount)
+        repository.addReload(newReload)
+        persistReloads()
+    }
+
+    fun deleteReload(id: String) {
+        repository.removeReload(id)
+        persistReloads()
+    }
+
+    private fun persistReloads() {
+        val prefs = getApplication<Application>().getSharedPreferences("reloads", Application.MODE_PRIVATE)
+        val dataSet = uiState.value.reloads.map { "${it.id}|${it.label}|${it.phoneNumber}|${it.amount}" }.toSet()
+        prefs.edit().putStringSet("reload_list", dataSet).apply()
     }
 
     fun checkAccessibilityStatus() {
@@ -81,6 +110,20 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
         val service = StkAccessibilityService.getInstance()
         if (service != null) {
             service.startStockCheck()
+        } else {
+            repository.updateStatus(AppStatus.Failed("Service not running. Please enable it."))
+        }
+    }
+
+    fun performReload(reload: ReloadAmount) {
+        if (!uiState.value.isAccessibilityEnabled) {
+            repository.updateStatus(AppStatus.Failed("Accessibility Service Disabled"))
+            return
+        }
+
+        val service = StkAccessibilityService.getInstance()
+        if (service != null) {
+            service.startReload(reload.phoneNumber, reload.amount)
         } else {
             repository.updateStatus(AppStatus.Failed("Service not running. Please enable it."))
         }
