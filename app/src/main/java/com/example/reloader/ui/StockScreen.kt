@@ -54,7 +54,8 @@ fun StockScreen(viewModel: StockViewModel) {
                     context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                 },
                 onQuickReload = { phone, amount -> viewModel.performQuickReload(phone, amount) },
-                onNavigateToManageAmounts = { currentScreen = Screen.ManageAmounts }
+                onNavigateToManageAmounts = { currentScreen = Screen.ManageAmounts },
+                onRefreshMessages = { viewModel.loadLatestSmsBalance() }
             )
         }
         Screen.ManageAmounts -> {
@@ -78,7 +79,8 @@ fun StockContent(
     onDeleteReload: (String) -> Unit,
     onEnableAccessibility: () -> Unit,
     onQuickReload: (String, String) -> Unit,
-    onNavigateToManageAmounts: () -> Unit
+    onNavigateToManageAmounts: () -> Unit,
+    onRefreshMessages: () -> Unit
 ) {
     var showQuickReloadDialog by remember { mutableStateOf(false) }
     var showAddCustomerDialog by remember { mutableStateOf(false) }
@@ -233,13 +235,17 @@ fun StockContent(
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
                     "Recent eZ Reload Messages",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
+                IconButton(onClick = onRefreshMessages) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Refresh Messages")
+                }
             }
 
             Box(modifier = Modifier.weight(1f)) {
@@ -621,9 +627,31 @@ fun MessageList(messages: List<com.example.reloader.model.SmsMessage>) {
 
 @Composable
 fun MessageItem(message: com.example.reloader.model.SmsMessage) {
+    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    
+    val backgroundColor = when {
+        message.body.contains("NOT SUCCESSFUL", ignoreCase = true) -> {
+            if (isDark) Color(0xFF442B2B) else Color(0xFFFFEBEE)
+        }
+        message.body.contains("RELOADED", ignoreCase = true) -> {
+            if (isDark) Color(0xFF1B391B) else Color(0xFFE8F5E9)
+        }
+        else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+    }
+
+    val contentColor = when {
+        message.body.contains("NOT SUCCESSFUL", ignoreCase = true) -> {
+            if (isDark) Color(0xFFFFDAD6) else Color(0xFFC62828)
+        }
+        message.body.contains("RELOADED", ignoreCase = true) -> {
+            if (isDark) Color(0xFFB4E3B4) else Color(0xFF2E7D32)
+        }
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+        colors = CardDefaults.cardColors(containerColor = backgroundColor),
         shape = MaterialTheme.shapes.medium
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
@@ -631,20 +659,20 @@ fun MessageItem(message: com.example.reloader.model.SmsMessage) {
                 Text(
                     text = "eZ Reload",
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = contentColor,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
                     text = message.date,
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color.Gray
+                    color = if (isDark) Color.LightGray else Color.Gray
                 )
             }
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = message.body,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = contentColor
             )
         }
     }
@@ -660,6 +688,7 @@ fun StockItem(label: String, value: String, valueColor: Color = MaterialTheme.co
 
 @Composable
 fun StatusSection(uiState: AppUiState) {
+    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
     val statusText = when (val status = uiState.status) {
         is AppStatus.Idle -> "Ready"
         is AppStatus.Running -> "Running Automation..."
@@ -669,7 +698,7 @@ fun StatusSection(uiState: AppUiState) {
     }
 
     val statusColor = when (uiState.status) {
-        is AppStatus.Success -> Color(0xFF4CAF50)
+        is AppStatus.Success -> if (isDark) Color(0xFF81C784) else Color(0xFF2E7D32)
         is AppStatus.Failed -> MaterialTheme.colorScheme.error
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
@@ -716,7 +745,8 @@ fun StockScreenPreview() {
             onDeleteReload = {},
             onEnableAccessibility = {},
             onQuickReload = { _, _ -> },
-            onNavigateToManageAmounts = {}
+            onNavigateToManageAmounts = {},
+            onRefreshMessages = {}
         )
     }
 }

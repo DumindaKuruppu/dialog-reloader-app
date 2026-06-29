@@ -122,21 +122,26 @@ class StockViewModel(application: Application) : AndroidViewModel(application) {
                 cursor?.use {
                     var balanceUpdated = false
                     while (it.moveToNext()) {
-                        val body = it.getString(0)
+                        val body = it.getString(0) ?: ""
+                        val address = it.getString(1) ?: ""
                         val dateLong = it.getLong(2)
                         val dateStr = dateFormat.format(Date(dateLong))
                         
-                        // Check for eZ Reload messages
-                        if (body.contains("RD Balance", ignoreCase = true) || 
-                            body.contains("Reload Success", ignoreCase = true) ||
-                            body.contains("eZ Reload", ignoreCase = true)) {
-                            
+                        // Check if message is from eZ Reload or contains relevant text
+                        val isEzReloadMsg = address.contains("eZ Reload", ignoreCase = true) || 
+                                           address.contains("7111", ignoreCase = true) || // Common eZ Reload shortcode
+                                           body.contains("RD Balance", ignoreCase = true) || 
+                                           body.contains("Reload Success", ignoreCase = true) ||
+                                           body.contains("eZ Reload", ignoreCase = true)
+                        
+                        if (isEzReloadMsg) {
                             if (!balanceUpdated && body.contains("RD Balance", ignoreCase = true)) {
                                 parseAndUpdateFromSms(body)
                                 balanceUpdated = true
                             }
                             
-                            if (messages.size < 20) {
+                            // Capture more messages (up to 50)
+                            if (messages.size < 50) {
                                 messages.add(com.example.reloader.model.SmsMessage(body, dateStr))
                             }
                         }
